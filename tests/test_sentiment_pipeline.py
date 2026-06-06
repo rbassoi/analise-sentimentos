@@ -2,7 +2,10 @@ import unittest
 
 from sentiment_ticketing.connectors.base import TicketConnector
 from sentiment_ticketing.core.models import SentimentResult, Ticket
-from sentiment_ticketing.core.sentiment_analyzer import KeywordSentimentAnalyzer
+from sentiment_ticketing.core.sentiment_analyzer import (
+    HybridTicketSentimentAnalyzer,
+    KeywordSentimentAnalyzer,
+)
 from sentiment_ticketing.pipeline import TicketSentimentPipeline
 
 
@@ -41,6 +44,32 @@ class KeywordSentimentAnalyzerTest(unittest.TestCase):
         sentiment = analyzer.analyze("bombom nao deve contar. bom deve contar.")
 
         self.assertEqual(sentiment.positive_matches, ["bom"])
+
+
+class FakeModelAnalyzer:
+    def analyze(self, text):
+        return SentimentResult(
+            score=0.9,
+            label="Altamente Positivo",
+            engine="sklearn_joblib",
+            confidence=0.9,
+            model_label="Positivo",
+        )
+
+
+class HybridTicketSentimentAnalyzerTest(unittest.TestCase):
+    def test_hybrid_keeps_support_keywords_as_stronger_signal(self):
+        analyzer = HybridTicketSentimentAnalyzer(
+            model_analyzer=FakeModelAnalyzer(),
+            keyword_weight=0.65,
+        )
+
+        sentiment = analyzer.analyze("Cliente insatisfeito com erro horrivel.")
+
+        self.assertLess(sentiment.score, 0)
+        self.assertEqual(sentiment.engine, "hybrid")
+        self.assertEqual(sentiment.model_label, "Positivo")
+        self.assertIn("erro", sentiment.negative_matches)
 
 
 class TicketSentimentPipelineTest(unittest.TestCase):

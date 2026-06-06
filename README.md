@@ -73,12 +73,38 @@ pipeline = TicketSentimentPipeline(connector)
 sentiment = pipeline.analyze_and_update("ABC-123")
 ```
 
+## Modelo PT-BR com scikit-learn/joblib
+
+O projeto suporta um motor opcional baseado em modelos `joblib`, inspirado pelo
+repositorio `thiagonogueira/sentiment-analysis-ptbr`. Esse repositorio usa um
+pipeline com `vectorizer` e `model`, e retorna rotulos como `Negativo`, `Neutro`
+e `Positivo`.
+
+Para usar um modelo desse tipo, informe o caminho pelo ambiente:
+
+```bash
+set SENTIMENT_MODEL_PATH=d:\modelos\sentiments-v2.joblib
+python server.py
+```
+
+Quando `SENTIMENT_MODEL_PATH` esta definido, a aplicacao usa um analisador
+hibrido:
+
+- o modelo treinado contribui com classificacao e confianca;
+- o lexico de suporte continua tendo peso maior para termos operacionais como
+  `erro`, `falha`, `problema` e `insatisfeito`;
+- a resposta da API mostra `engine`, `model_label` e `confidence`.
+
+O modelo do repositorio externo nao foi copiado para este projeto porque nao ha
+licenca explicita no repositorio analisado. Tambem pode haver alerta de versao
+do scikit-learn ao carregar um `.joblib` treinado em versao diferente.
+
 ## Proximos Passos Recomendados
 
 - Adicionar conectores especificos para Zendesk e Jira Service Management.
 - Criar arquivo de configuracao YAML/JSON para conectores proprietarios.
 - Persistir historico de sentimento por ticket.
-- Trocar ou complementar o analisador por modelo ML/LLM.
+- Treinar um modelo proprio com dados reais de tickets de suporte.
 - Adicionar webhook/API para processamento automatico.
 - Decidir licenciamento caso o uso com software proprietario seja requisito.
 

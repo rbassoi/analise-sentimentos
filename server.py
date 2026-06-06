@@ -1,7 +1,7 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from sentiment_ticketing.core.sentiment_analyzer import KeywordSentimentAnalyzer
+from sentiment_ticketing.core.sentiment_analyzer import create_default_analyzer
 
 
 HOST = "127.0.0.1"
@@ -420,6 +420,8 @@ INDEX_HTML = """<!doctype html>
             <div class="result-list">
               <div class="result-row"><span>Palavras positivas</span><span id="positive">-</span></div>
               <div class="result-row"><span>Palavras negativas</span><span id="negative">-</span></div>
+              <div class="result-row"><span>Motor</span><span id="engine">keyword</span></div>
+              <div class="result-row"><span>Modelo PT-BR</span><span id="model">-</span></div>
               <div class="result-row"><span>Classificacao</span><span id="classification">Manual</span></div>
             </div>
           </div>
@@ -553,6 +555,10 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('label').textContent = data.label;
       document.getElementById('positive').textContent = data.positive_matches.join(', ') || '-';
       document.getElementById('negative').textContent = data.negative_matches.join(', ') || '-';
+      document.getElementById('engine').textContent = data.engine || 'keyword';
+      document.getElementById('model').textContent = data.model_label
+        ? `${data.model_label}${data.confidence ? ` (${Math.round(data.confidence * 100)}%)` : ''}`
+        : '-';
       document.getElementById('result-hint').textContent = 'Analise concluida.';
       document.getElementById('classification').textContent = score < 0 ? 'Atencao prioritaria' : 'Monitoramento normal';
       meterFill.style.width = `${Math.max(0, Math.min(100, (score + 1) * 50))}%`;
@@ -629,7 +635,7 @@ INDEX_HTML = """<!doctype html>
 
 
 class SentimentRequestHandler(BaseHTTPRequestHandler):
-    analyzer = KeywordSentimentAnalyzer()
+    analyzer = create_default_analyzer()
 
     def do_GET(self) -> None:
         if self.path == "/":
@@ -661,6 +667,9 @@ class SentimentRequestHandler(BaseHTTPRequestHandler):
                 "label": sentiment.label,
                 "positive_matches": sentiment.positive_matches,
                 "negative_matches": sentiment.negative_matches,
+                "engine": sentiment.engine,
+                "confidence": sentiment.confidence,
+                "model_label": sentiment.model_label,
             },
         )
 

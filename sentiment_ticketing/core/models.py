@@ -8,6 +8,9 @@ class SentimentResult:
     label: str
     positive_matches: list[str] = field(default_factory=list)
     negative_matches: list[str] = field(default_factory=list)
+    engine: str = "keyword"
+    confidence: float | None = None
+    model_label: str | None = None
 
 
 @dataclass(frozen=True)
