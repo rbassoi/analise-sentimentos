@@ -1,31 +1,64 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 
+type SentimentResult = {
+  score: number;
+  label: string;
+  positiveWords: string[];
+  negativeWords: string[];
+};
+
 const SentimentAnalyzer = () => {
   const [text, setText] = useState('');
-  const [sentiment, setSentiment] = useState(null);
-  const [language, setLanguage] = useState('portuguese');
+  const [sentiment, setSentiment] = useState<SentimentResult | null>(null);
 
-  // Comprehensive lists of sentiment-indicating words
-  const sentimentLists = {
-    portuguese: {
+  const sentimentLists = useMemo(
+    () => ({
       positive: [
-        'bom', 'ótimo', 'excelente', 'maravilhoso', 'incrível', 
-        'feliz', 'amor', 'adorável', 'fantástico', 'delicioso',
-        'impressionante', 'perfeito', 'alegre', 'esperançoso', 'positivo'
+        'bom',
+        'otimo',
+        'excelente',
+        'maravilhoso',
+        'incrivel',
+        'feliz',
+        'fantastico',
+        'perfeito',
+        'resolvido',
+        'satisfeito',
       ],
       negative: [
-        'ruim', 'terrível', 'horrível', 'péssimo', 'detestável', 
-        'triste', 'ódio', 'frustrado', 'raiva', 'péssimo',
-        'desapontado', 'chateado', 'miserável', 'depressivo', 'negativo'
+        'ruim',
+        'pessimo',
+        'horrivel',
+        'terrivel',
+        'frustrado',
+        'raiva',
+        'problema',
+        'erro',
+        'falha',
+        'insatisfeito',
       ],
-      intensifiers: {
-        positive: ['muito', 'extremamente', 'absolutamente', 'totalmente', 'realmente'],
-        negative: ['extremamente', 'absolutamente', 'completamente', 'totalmente']
-      }
-    }
+    }),
+    []
+  );
+
+  const normalizeText = (value: string) =>
+    value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+  const findMatches = (lowerText: string, words: string[]) =>
+    words.filter((word) => new RegExp(`\\b${word}\\b`, 'i').test(lowerText));
+
+  const getSentimentLabel = (score: number) => {
+    if (score > 0.5) return 'Altamente Positivo';
+    if (score > 0) return 'Positivo';
+    if (score === 0) return 'Neutro';
+    if (score > -0.5) return 'Negativo';
+    return 'Altamente Negativo';
   };
 
   const analyzeSentiment = () => {
@@ -34,56 +67,19 @@ const SentimentAnalyzer = () => {
       return;
     }
 
-    const lowerText = text.toLowerCase();
-    const currentLangSentiments = sentimentLists[language];
-    
-    // Count positive and negative words
-    const positiveMatches = currentLangSentiments.positive.filter(word => 
-      lowerText.includes(word)
-    );
-    const negativeMatches = currentLangSentiments.negative.filter(word => 
-      lowerText.includes(word)
-    );
-
-    // Check for intensifiers
-    const positiveIntensifiers = currentLangSentiments.intensifiers.positive.filter(word => 
-      lowerText.includes(word)
-    );
-    const negativeIntensifiers = currentLangSentiments.intensifiers.negative.filter(word => 
-      lowerText.includes(word)
-    );
-
-    // Calculate sentiment score
-    const positiveScore = positiveMatches.length + (positiveIntensifiers.length * 0.5);
-    const negativeScore = negativeMatches.length + (negativeIntensifiers.length * 0.5);
-
+    const lowerText = normalizeText(text);
+    const positiveMatches = findMatches(lowerText, sentimentLists.positive);
+    const negativeMatches = findMatches(lowerText, sentimentLists.negative);
+    const positiveScore = positiveMatches.length;
+    const negativeScore = negativeMatches.length;
     const sentimentScore = (positiveScore - negativeScore) / (positiveScore + negativeScore + 1);
 
     setSentiment({
       score: sentimentScore,
+      label: getSentimentLabel(sentimentScore),
       positiveWords: positiveMatches,
-      negativeWords: negativeMatches
+      negativeWords: negativeMatches,
     });
-  };
-
-  const getSentimentLabel = (score) => {
-    const labels = {
-      'positive': {
-        highlyPositive: 'Altamente Positivo',
-        positive: 'Positivo'
-      },
-      'negative': {
-        neutral: 'Neutro',
-        negative: 'Negativo',
-        highlyNegative: 'Altamente Negativo'
-      }
-    };
-
-    if (score > 0.5) return labels.positive.highlyPositive;
-    if (score > 0) return labels.positive.positive;
-    if (score === 0) return labels.negative.neutral;
-    if (score > -0.5) return labels.negative.negative;
-    return labels.negative.highlyNegative;
   };
 
   return (
@@ -108,7 +104,7 @@ const SentimentAnalyzer = () => {
         {sentiment && (
           <div className="mt-4 p-3 bg-gray-100 rounded">
             <p className="font-semibold">
-              Sentimento: {getSentimentLabel(sentiment.score)}
+              Sentimento: {sentiment.label}
             </p>
             <p>Pontuação de Sentimento: {sentiment.score.toFixed(2)}</p>
             {sentiment.positiveWords.length > 0 && (
@@ -123,8 +119,8 @@ const SentimentAnalyzer = () => {
             )}
           </div>
         )}
-      </Card>
-    </CardContent>
+      </CardContent>
+    </Card>
   );
 };
 
