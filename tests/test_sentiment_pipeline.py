@@ -45,6 +45,14 @@ class KeywordSentimentAnalyzerTest(unittest.TestCase):
 
         self.assertEqual(sentiment.positive_matches, ["bom"])
 
+    def test_analyze_negated_positive_word_as_negative(self):
+        analyzer = KeywordSentimentAnalyzer()
+
+        sentiment = analyzer.analyze("Nao estou feliz com o suporte.")
+
+        self.assertLess(sentiment.score, 0)
+        self.assertIn("nao feliz", sentiment.negative_matches)
+
 
 class FakeModelAnalyzer:
     def analyze(self, text):
@@ -67,8 +75,8 @@ class HybridTicketSentimentAnalyzerTest(unittest.TestCase):
         sentiment = analyzer.analyze("Cliente insatisfeito com erro horrivel.")
 
         self.assertLess(sentiment.score, 0)
-        self.assertEqual(sentiment.engine, "hybrid")
-        self.assertEqual(sentiment.model_label, "Positivo")
+        self.assertEqual(sentiment.engine, "hybrid_leia_ml")
+        self.assertIn("Positivo", sentiment.model_label)
         self.assertIn("erro", sentiment.negative_matches)
 
 

@@ -43,11 +43,29 @@ class KeywordSentimentAnalyzer:
             "falha",
             "insatisfeito",
         ]
+        self.negations = {
+            "nao",
+            "nem",
+            "nunca",
+            "jamais",
+            "sem",
+        }
 
     def analyze(self, text: str) -> SentimentResult:
         normalized_text = self._normalize(text)
+        tokens = re.findall(r"\b\w+\b|[.!?;:]", normalized_text)
         positive_matches = self._find_words(normalized_text, self.positive_words)
         negative_matches = self._find_words(normalized_text, self.negative_words)
+        negated_positive = self._find_negated_words(tokens, positive_matches)
+
+        if negated_positive:
+            positive_matches = [
+                word for word in positive_matches if word not in negated_positive
+            ]
+            negative_matches = [
+                *negative_matches,
+                *[f"nao {word}" for word in negated_positive],
+            ]
 
         positive_count = len(positive_matches)
         negative_count = len(negative_matches)
@@ -68,6 +86,27 @@ class KeywordSentimentAnalyzer:
             if re.search(rf"\b{re.escape(normalized_word)}\b", normalized_text):
                 matches.append(word)
         return matches
+
+    def _find_negated_words(self, tokens: list[str], words: list[str]) -> list[str]:
+        negated_words: list[str] = []
+        for word in words:
+            normalized_word = self._normalize(word)
+            for index, token in enumerate(tokens):
+                if token != normalized_word:
+                    continue
+                previous_tokens = self._previous_words_in_clause(tokens, index)
+                if any(previous in self.negations for previous in previous_tokens):
+                    negated_words.append(word)
+                    break
+        return negated_words
+
+    def _previous_words_in_clause(self, tokens: list[str], index: int) -> list[str]:
+        previous_tokens: list[str] = []
+        for token in reversed(tokens[max(0, index - 4) : index]):
+            if token in {".", "!", "?", ";", ":"}:
+                break
+            previous_tokens.insert(0, token)
+        return previous_tokens[-3:]
 
     def _normalize(self, text: str) -> str:
         without_accents = unicodedata.normalize("NFKD", text or "")
@@ -134,36 +173,79 @@ class SklearnJoblibSentimentAnalyzer:
         return KeywordSentimentAnalyzer()._get_sentiment_label(score)
 
 
+class LeiaSentimentAnalyzer:
+    def __init__(self):
+        from .leia_portuguese import SentimentIntensityAnalyzer
+
+        self.analyzer = SentimentIntensityAnalyzer()
+        self.labeler = KeywordSentimentAnalyzer()
+
+    def analyze(self, text: str) -> SentimentResult:
+        scores = self.analyzer.polarity_scores(text or "")
+        compound = float(scores["compound"])
+        confidence = max(float(scores["pos"]), float(scores["neg"]), float(scores["neu"]))
+
+        return SentimentResult(
+            score=compound,
+            label=self.labeler._get_sentiment_label(compound),
+            engine="leia",
+            confidence=confidence,
+            model_label=self._model_label(compound),
+        )
+
+    def _model_label(self, compound: float) -> str:
+        if compound >= 0.05:
+            return "Positivo"
+        if compound <= -0.05:
+            return "Negativo"
+        return "Neutro"
+
+
 class HybridTicketSentimentAnalyzer:
     def __init__(
         self,
         keyword_analyzer: KeywordSentimentAnalyzer | None = None,
+        leia_analyzer: LeiaSentimentAnalyzer | None = None,
         model_analyzer: SklearnJoblibSentimentAnalyzer | None = None,
-        keyword_weight: float = 0.65,
+        keyword_weight: float = 0.35,
+        leia_weight: float = 0.45,
     ):
         self.keyword_analyzer = keyword_analyzer or KeywordSentimentAnalyzer()
+        self.leia_analyzer = leia_analyzer or LeiaSentimentAnalyzer()
         self.model_analyzer = model_analyzer
         self.keyword_weight = keyword_weight
+        self.leia_weight = leia_weight
 
     def analyze(self, text: str) -> SentimentResult:
         keyword_result = self.keyword_analyzer.analyze(text)
-        if self.model_analyzer is None:
-            return keyword_result
+        leia_result = self.leia_analyzer.analyze(text)
 
-        model_result = self.model_analyzer.analyze(text)
-        model_weight = 1 - self.keyword_weight
         score = (keyword_result.score * self.keyword_weight) + (
-            model_result.score * model_weight
+            leia_result.score * self.leia_weight
         )
+        confidence = leia_result.confidence
+        model_label = leia_result.model_label
+        engine = "hybrid_leia"
+
+        if self.model_analyzer is not None:
+            model_result = self.model_analyzer.analyze(text)
+            model_weight = max(0.0, 1 - self.keyword_weight - self.leia_weight)
+            score += model_result.score * model_weight
+            confidence = model_result.confidence
+            model_label = f"LeIA: {leia_result.model_label}; ML: {model_result.model_label}"
+            engine = "hybrid_leia_ml"
+
+        if any(match.startswith("nao ") for match in keyword_result.negative_matches):
+            score -= 0.25
 
         return SentimentResult(
             score=score,
             label=self.keyword_analyzer._get_sentiment_label(score),
             positive_matches=keyword_result.positive_matches,
             negative_matches=keyword_result.negative_matches,
-            engine="hybrid",
-            confidence=model_result.confidence,
-            model_label=model_result.model_label,
+            engine=engine,
+            confidence=confidence,
+            model_label=model_label,
         )
 
 

@@ -75,10 +75,18 @@ sentiment = pipeline.analyze_and_update("ABC-123")
 
 ## Modelo PT-BR com scikit-learn/joblib
 
-O projeto suporta um motor opcional baseado em modelos `joblib`, inspirado pelo
-repositorio `thiagonogueira/sentiment-analysis-ptbr`. Esse repositorio usa um
-pipeline com `vectorizer` e `model`, e retorna rotulos como `Negativo`, `Neutro`
-e `Positivo`.
+O analisador padrao usa uma abordagem hibrida:
+
+- LeIA, uma adaptacao em portugues do algoritmo VADER;
+- lexico operacional de suporte para termos como `erro`, `falha`, `problema` e
+  `insatisfeito`;
+- modelo opcional `joblib/scikit-learn` quando `SENTIMENT_MODEL_PATH` esta
+  configurado.
+
+O suporte a `joblib` foi inspirado pelo repositorio
+`thiagonogueira/sentiment-analysis-ptbr`. Esse repositorio usa um pipeline com
+`vectorizer` e `model`, e retorna rotulos como `Negativo`, `Neutro` e
+`Positivo`.
 
 Para usar um modelo desse tipo, informe o caminho pelo ambiente:
 
@@ -90,14 +98,22 @@ python server.py
 Quando `SENTIMENT_MODEL_PATH` esta definido, a aplicacao usa um analisador
 hibrido:
 
+- LeIA contribui com `compound`, negacao, pontuacao e intensificadores;
 - o modelo treinado contribui com classificacao e confianca;
-- o lexico de suporte continua tendo peso maior para termos operacionais como
-  `erro`, `falha`, `problema` e `insatisfeito`;
+- o lexico de suporte reforca termos operacionais de tickets;
 - a resposta da API mostra `engine`, `model_label` e `confidence`.
 
 O modelo do repositorio externo nao foi copiado para este projeto porque nao ha
 licenca explicita no repositorio analisado. Tambem pode haver alerta de versao
 do scikit-learn ao carregar um `.joblib` treinado em versao diferente.
+
+## LeIA
+
+Este projeto incorpora codigo e lexicos do LeIA
+(`https://github.com/rafjaa/LeIA`), licenciado sob MIT. O LeIA preserva a API do
+VADER, aceita texto sem pre-processamento e retorna `pos`, `neg`, `neu` e
+`compound`, onde `compound` varia de -1 a +1. A atribuicao esta documentada em
+`THIRD_PARTY_NOTICES.md`.
 
 ## Proximos Passos Recomendados
 
