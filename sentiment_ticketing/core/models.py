@@ -21,6 +21,8 @@ class Ticket:
     comments: list[str] = field(default_factory=list)
     status: str | None = None
     priority: str | None = None
+    company_id: str | None = None
+    company_name: str | None = None
     source: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 

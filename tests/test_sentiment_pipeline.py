@@ -1,6 +1,7 @@
 import unittest
 
 from sentiment_ticketing.connectors.base import TicketConnector
+from sentiment_ticketing.connectors.freshdesk import FreshdeskConnector
 from sentiment_ticketing.core.models import SentimentResult, Ticket
 from sentiment_ticketing.core.sentiment_analyzer import (
     HybridTicketSentimentAnalyzer,
@@ -25,6 +26,30 @@ class FakeConnector(TicketConnector):
     def update_ticket_sentiment(self, ticket_id, sentiment):
         self.updated_ticket_id = ticket_id
         self.updated_sentiment = sentiment
+
+
+class FreshdeskConnectorTest(unittest.TestCase):
+    def test_normalizes_full_freshdesk_url_to_subdomain(self):
+        connector = FreshdeskConnector(
+            domain="https://wisebyte.freshdesk.com/",
+            api_key="key",
+        )
+
+        self.assertEqual(
+            connector.base_url,
+            "https://wisebyte.freshdesk.com/api/v2",
+        )
+
+    def test_ticket_from_payload_includes_company_fields(self):
+        connector = FreshdeskConnector(domain="wisebyte", api_key="key")
+        connector._company_cache["10"] = "ACME"
+
+        ticket = connector._ticket_from_payload(
+            {"id": 123, "subject": "Teste", "company_id": 10}
+        )
+
+        self.assertEqual(ticket.company_id, "10")
+        self.assertEqual(ticket.company_name, "ACME")
 
 
 class KeywordSentimentAnalyzerTest(unittest.TestCase):

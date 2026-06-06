@@ -73,6 +73,32 @@ pipeline = TicketSentimentPipeline(connector)
 sentiment = pipeline.analyze_and_update("ABC-123")
 ```
 
+## Feedback e Retreino
+
+A tela de analise permite marcar se o resultado esta certo ou errado. Quando
+estiver errado, cada palavra do texto aparece com botoes `+` e `-` para marcar
+aquela ocorrencia como positiva ou negativa.
+
+Os feedbacks sao salvos para retreino. Por padrao, o projeto usa:
+
+```text
+data/sentiment_feedback.jsonl
+```
+
+Para usar PostgreSQL, instale as dependencias e configure `DATABASE_URL`:
+
+```bash
+pip install -r requirements.txt
+set DATABASE_URL=postgresql://usuario:senha@localhost:5432/sentimentos
+python server.py
+```
+
+Tambem e possivel usar variaveis `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` e
+`PGPASSWORD`. A aplicacao cria automaticamente a tabela `sentiment_feedback`.
+
+A pagina **Retreino** mostra as palavras salvas, contagens positivas/negativas
+e exemplos de origem.
+
 ## Modelo PT-BR com scikit-learn/joblib
 
 O analisador padrao usa uma abordagem hibrida:

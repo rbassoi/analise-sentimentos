@@ -1,3 +1,4 @@
 requests
 joblib
 scikit-learn
+psycopg[binary]
