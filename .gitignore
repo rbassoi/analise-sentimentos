@@ -3,3 +3,4 @@ __pycache__/
 .tmp-*/
 models/*.joblib
 data/sentiment_feedback.jsonl
+data/retraining_config.json

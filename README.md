@@ -76,8 +76,16 @@ sentiment = pipeline.analyze_and_update("ABC-123")
 ## Feedback e Retreino
 
 A tela de analise permite marcar se o resultado esta certo ou errado. Quando
-estiver errado, cada palavra do texto aparece com botoes `+` e `-` para marcar
-aquela ocorrencia como positiva ou negativa.
+estiver errado, cada palavra do texto pode ser marcada com botoes `+` e `-` para
+marcar aquela ocorrencia como positiva ou negativa. A tela tambem mostra uma
+leitura colorida do texto:
+
+- verde: palavra interpretada como positiva;
+- vermelho: palavra interpretada como negativa;
+- cinza: palavra neutra.
+
+Quando a analise e marcada como errada, clicar nas palavras da leitura colorida
+altera a cor e salva a cor escolhida como feedback de retreino.
 
 Os feedbacks sao salvos para retreino. Por padrao, o projeto usa:
 
@@ -97,7 +105,20 @@ Tambem e possivel usar variaveis `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` e
 `PGPASSWORD`. A aplicacao cria automaticamente a tabela `sentiment_feedback`.
 
 A pagina **Retreino** mostra as palavras salvas, contagens positivas/negativas
-e exemplos de origem.
+e exemplos de origem. A mesma pagina permite configurar o intervalo de retreino:
+manual, diario, semanal ou mensal. O padrao e semanal.
+
+Use o botao **Executar retreino agora** para treinar um modelo com os feedbacks
+salvos. O arquivo gerado fica em:
+
+```text
+models/sentiment-feedback.joblib
+```
+
+Depois do treino manual, o servidor recarrega o analisador automaticamente e passa
+a usar o modelo em conjunto com LeIA e o lexico de suporte. Quando o intervalo
+configurado vence, o servidor tenta executar o retreino automaticamente na proxima
+analise feita pela interface ou API.
 
 ## Modelo PT-BR com scikit-learn/joblib
 

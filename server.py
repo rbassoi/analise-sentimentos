@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from sentiment_ticketing.connectors import FreshdeskConnector
+from sentiment_ticketing.core.retraining import DEFAULT_MODEL_PATH, train_feedback_model
 from sentiment_ticketing.core.sentiment_analyzer import create_default_analyzer
 
 
@@ -14,6 +15,8 @@ HOST = "127.0.0.1"
 PORT = 8000
 DATA_DIR = Path("data")
 FEEDBACK_FILE = DATA_DIR / "sentiment_feedback.jsonl"
+RETRAINING_CONFIG_FILE = DATA_DIR / "retraining_config.json"
+RETRAINED_MODEL_FILE = DEFAULT_MODEL_PATH
 
 
 CONNECTORS = [
@@ -206,6 +209,81 @@ class FeedbackStore:
 
 
 FEEDBACK_STORE = FeedbackStore(FEEDBACK_FILE)
+
+
+def default_retraining_config() -> dict:
+    return {
+        "interval": "weekly",
+        "interval_label": "Semanal",
+        "last_run_at": None,
+        "next_run_at": next_retraining_run("weekly"),
+    }
+
+
+def load_retraining_config() -> dict:
+    if not RETRAINING_CONFIG_FILE.exists():
+        return default_retraining_config()
+    try:
+        with RETRAINING_CONFIG_FILE.open("r", encoding="utf-8") as config_file:
+            config = json.load(config_file)
+    except (json.JSONDecodeError, OSError):
+        return default_retraining_config()
+    interval = config.get("interval", "weekly")
+    return {
+        "interval": interval,
+        "interval_label": retraining_interval_label(interval),
+        "last_run_at": config.get("last_run_at"),
+        "next_run_at": config.get("next_run_at") or next_retraining_run(interval),
+    }
+
+
+def save_retraining_config(interval: str) -> dict:
+    if interval not in {"manual", "daily", "weekly", "monthly"}:
+        interval = "weekly"
+    config = {
+        "interval": interval,
+        "interval_label": retraining_interval_label(interval),
+        "last_run_at": None,
+        "next_run_at": next_retraining_run(interval),
+    }
+    DATA_DIR.mkdir(exist_ok=True)
+    with RETRAINING_CONFIG_FILE.open("w", encoding="utf-8") as config_file:
+        json.dump(config, config_file, ensure_ascii=False, indent=2)
+    return config
+
+
+def mark_retraining_run() -> dict:
+    config = load_retraining_config()
+    interval = config.get("interval", "weekly")
+    config["interval_label"] = retraining_interval_label(interval)
+    config["last_run_at"] = datetime.now(timezone.utc).isoformat()
+    config["next_run_at"] = next_retraining_run(interval)
+    DATA_DIR.mkdir(exist_ok=True)
+    with RETRAINING_CONFIG_FILE.open("w", encoding="utf-8") as config_file:
+        json.dump(config, config_file, ensure_ascii=False, indent=2)
+    return config
+
+
+def retraining_interval_label(interval: str) -> str:
+    return {
+        "manual": "Manual",
+        "daily": "Diario",
+        "weekly": "Semanal",
+        "monthly": "Mensal",
+    }.get(interval, "Semanal")
+
+
+def next_retraining_run(interval: str) -> str | None:
+    if interval == "manual":
+        return None
+    now = datetime.now(timezone.utc)
+    if interval == "daily":
+        delta_seconds = 24 * 60 * 60
+    elif interval == "monthly":
+        delta_seconds = 30 * 24 * 60 * 60
+    else:
+        delta_seconds = 7 * 24 * 60 * 60
+    return datetime.fromtimestamp(now.timestamp() + delta_seconds, timezone.utc).isoformat()
 
 
 INDEX_HTML = """<!doctype html>
@@ -506,6 +584,71 @@ INDEX_HTML = """<!doctype html>
       padding: 10px;
       line-height: 1.75;
       white-space: pre-wrap;
+    }
+    .analysis-preview {
+      margin-top: 12px;
+      display: grid;
+      gap: 8px;
+    }
+    .analysis-preview-box {
+      max-height: 260px;
+      overflow: auto;
+      border: 1px solid #d7e0e6;
+      border-radius: 8px;
+      background: #f8fafb;
+      padding: 10px;
+      line-height: 1.85;
+      white-space: pre-wrap;
+    }
+    .analysis-word {
+      border: 1px solid transparent;
+      border-radius: 5px;
+      padding: 2px 4px;
+      margin: 0 1px;
+      background: #eef1f3;
+      color: #3f4d55;
+      font-weight: 700;
+    }
+    .analysis-word.positive {
+      background: #dff1e9;
+      border-color: #9dccba;
+      color: #176b5b;
+    }
+    .analysis-word.negative {
+      background: #fae4e1;
+      border-color: #e0aaa5;
+      color: #a33a32;
+    }
+    .analysis-word.editable {
+      cursor: pointer;
+      box-shadow: 0 0 0 2px rgba(23, 107, 91, 0.08);
+    }
+    .analysis-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: #60707a;
+      font-size: 13px;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      background: #eef1f3;
+      border: 1px solid #c8d5dc;
+    }
+    .legend-swatch.positive {
+      background: #dff1e9;
+      border-color: #9dccba;
+    }
+    .legend-swatch.negative {
+      background: #fae4e1;
+      border-color: #e0aaa5;
     }
     .word-chip {
       border: 1px solid #c8d5dc;
@@ -822,6 +965,14 @@ INDEX_HTML = """<!doctype html>
               Conteudo para analise
               <textarea id="text" placeholder="Ex.: Cliente insatisfeito com erro recorrente no portal..."></textarea>
             </label>
+            <div class="analysis-preview">
+              <div class="analysis-legend">
+                <span class="legend-item"><span class="legend-swatch positive"></span>positiva</span>
+                <span class="legend-item"><span class="legend-swatch negative"></span>negativa</span>
+                <span class="legend-item"><span class="legend-swatch"></span>neutra</span>
+              </div>
+              <div class="analysis-preview-box" id="analysis-preview">A analise colorida aparece aqui.</div>
+            </div>
             <div class="actions">
               <button class="primary" id="analyze">Analisar sentimento</button>
               <button class="secondary" id="clear-text">Limpar</button>
@@ -849,7 +1000,7 @@ INDEX_HTML = """<!doctype html>
             <div class="feedback-panel">
               <div>
                 <h2>Validacao</h2>
-                <p>Informe se a analise esta correta. Se estiver errada, marque palavras para retreino.</p>
+                <p>Informe se a analise geral esta correta e marque palavras para retreino quando quiser ajustar o vocabulario.</p>
               </div>
               <div class="segmented">
                 <button type="button" id="feedback-correct">Certa</button>
@@ -1001,6 +1152,24 @@ INDEX_HTML = """<!doctype html>
             </div>
             <button class="secondary" id="refresh-training">Atualizar</button>
           </div>
+          <div class="form-grid">
+            <label>Intervalo de retreino
+              <select id="retraining-interval">
+                <option value="manual">Manual</option>
+                <option value="daily">Diario</option>
+                <option value="weekly">Semanal</option>
+                <option value="monthly">Mensal</option>
+              </select>
+            </label>
+            <label>Proxima execucao
+              <input id="retraining-next-run" readonly>
+            </label>
+          </div>
+          <div class="actions">
+            <button class="primary" id="save-retraining-config">Salvar intervalo</button>
+            <button class="secondary" id="run-retraining">Executar retreino agora</button>
+          </div>
+          <div class="feedback-status" id="retraining-config-status"></div>
           <div class="training-table" id="training-results"></div>
         </div>
       </section>
@@ -1019,7 +1188,8 @@ INDEX_HTML = """<!doctype html>
       positiveWords: new Set(),
       negativeWords: new Set(),
       positiveTerms: new Map(),
-      negativeTerms: new Map()
+      negativeTerms: new Map(),
+      analysisOverrides: new Map()
     };
 
     function setActiveView(view) {
@@ -1068,6 +1238,7 @@ INDEX_HTML = """<!doctype html>
       meterFill.style.width = `${Math.max(0, Math.min(100, (score + 1) * 50))}%`;
       meterFill.style.background = score < 0 ? '#b5473f' : score > 0 ? '#176b5b' : '#667782';
       resetFeedbackControls();
+      renderAnalysisPreview(false);
     }
 
     button.addEventListener('click', async () => {
@@ -1089,6 +1260,14 @@ INDEX_HTML = """<!doctype html>
       text.value = '';
       updateResult({ score: 0, label: 'Neutro', positive_matches: [], negative_matches: [] });
       document.getElementById('result-hint').textContent = 'Aguardando texto para analise.';
+      renderAnalysisPreview(false);
+    });
+
+    text.addEventListener('input', () => {
+      feedbackState.currentTicket = null;
+      feedbackState.currentSentiment = null;
+      resetFeedbackControls();
+      document.getElementById('analysis-preview').textContent = 'Clique em Analisar sentimento para atualizar as cores.';
     });
 
     document.querySelectorAll('.tab').forEach((tab) => {
@@ -1236,6 +1415,7 @@ INDEX_HTML = """<!doctype html>
       feedbackState.negativeWords = new Set();
       feedbackState.positiveTerms = new Map();
       feedbackState.negativeTerms = new Map();
+      feedbackState.analysisOverrides = new Map();
       document.getElementById('feedback-correct').classList.remove('active');
       document.getElementById('feedback-wrong').classList.remove('active');
       document.getElementById('word-labels').classList.remove('active');
@@ -1261,6 +1441,75 @@ INDEX_HTML = """<!doctype html>
         .toLowerCase();
     }
 
+    function renderAnalysisPreview(isEditable) {
+      const container = document.getElementById('analysis-preview');
+      const source = text.value || '';
+      const tokens = tokenizeForFeedback(source);
+      if (!source.trim()) {
+        container.textContent = 'A analise colorida aparece aqui.';
+        return;
+      }
+      if (tokens.length === 0) {
+        container.textContent = source;
+        return;
+      }
+
+      const positiveMatches = new Set((feedbackState.currentSentiment?.positive_matches || []).map(normalizeFeedbackWord));
+      const negativeMatches = new Set((feedbackState.currentSentiment?.negative_matches || []).map(normalizeFeedbackWord));
+      let html = '';
+      let cursor = 0;
+      tokens.forEach((token) => {
+        html += escapeHtml(source.slice(cursor, token.start));
+        const override = feedbackState.analysisOverrides.get(token.id);
+        const polarity = override || inferTokenPolarity(token.word, positiveMatches, negativeMatches);
+        html += `<button type="button" class="analysis-word ${polarity} ${isEditable ? 'editable' : ''}" data-token-id="${token.id}" data-token-index="${token.index}" data-word="${escapeHtml(token.word)}" data-state="${polarity}" title="${isEditable ? 'Clique para alternar: neutra, positiva, negativa' : 'Cor definida pela analise atual'}">${escapeHtml(source.slice(token.start, token.end))}</button>`;
+        cursor = token.end;
+      });
+      html += escapeHtml(source.slice(cursor));
+      container.innerHTML = html;
+
+      if (isEditable) {
+        container.querySelectorAll('.analysis-word').forEach((item) => {
+          item.addEventListener('click', () => toggleAnalysisWord(item));
+        });
+      }
+    }
+
+    function inferTokenPolarity(word, positiveMatches, negativeMatches) {
+      if (negativeMatches.has(word) || negativeMatches.has(`nao ${word}`)) return 'negative';
+      if (positiveMatches.has(word)) return 'positive';
+      return 'neutral';
+    }
+
+    function toggleAnalysisWord(wordButton) {
+      const tokenId = wordButton.dataset.tokenId;
+      const word = wordButton.dataset.word;
+      const tokenIndex = Number(wordButton.dataset.tokenIndex || 0);
+      const currentState = feedbackState.analysisOverrides.get(tokenId) || wordButton.dataset.state || 'neutral';
+      const nextState = currentState === 'neutral'
+        ? 'positive'
+        : currentState === 'positive'
+          ? 'negative'
+          : 'neutral';
+
+      feedbackState.positiveTerms.delete(tokenId);
+      feedbackState.negativeTerms.delete(tokenId);
+
+      if (nextState === 'positive') {
+        feedbackState.analysisOverrides.set(tokenId, 'positive');
+        feedbackState.positiveTerms.set(tokenId, { word, index: tokenIndex });
+      } else if (nextState === 'negative') {
+        feedbackState.analysisOverrides.set(tokenId, 'negative');
+        feedbackState.negativeTerms.set(tokenId, { word, index: tokenIndex });
+      } else {
+        feedbackState.analysisOverrides.set(tokenId, 'neutral');
+      }
+
+      syncFeedbackWordSets();
+      renderAnalysisPreview(true);
+      renderWordChips();
+    }
+
     function renderWordChips() {
       const tokens = tokenizeForFeedback(text.value);
       const container = document.getElementById('feedback-chip-list');
@@ -1270,6 +1519,14 @@ INDEX_HTML = """<!doctype html>
       }
       container.innerHTML = renderClickableText(text.value, tokens);
       container.querySelectorAll('.polarity-button').forEach((chip) => {
+        const tokenId = chip.dataset.tokenId;
+        const polarity = chip.dataset.polarity;
+        if (polarity === 'positive' && feedbackState.positiveTerms.has(tokenId)) {
+          chip.classList.add('active');
+        }
+        if (polarity === 'negative' && feedbackState.negativeTerms.has(tokenId)) {
+          chip.classList.add('active');
+        }
         chip.addEventListener('click', () => toggleFeedbackWord(chip));
       });
     }
@@ -1314,14 +1571,20 @@ INDEX_HTML = """<!doctype html>
 
       if (!isActive && polarity === 'positive') {
         feedbackState.positiveTerms.set(tokenId, { word, index: tokenIndex });
+        feedbackState.analysisOverrides.set(tokenId, 'positive');
         button.classList.add('active');
       }
       if (!isActive && polarity === 'negative') {
         feedbackState.negativeTerms.set(tokenId, { word, index: tokenIndex });
+        feedbackState.analysisOverrides.set(tokenId, 'negative');
         button.classList.add('active');
+      }
+      if (isActive) {
+        feedbackState.analysisOverrides.set(tokenId, 'neutral');
       }
 
       syncFeedbackWordSets();
+      renderAnalysisPreview(feedbackState.correctness !== null);
     }
 
     function syncFeedbackWordSets() {
@@ -1388,7 +1651,9 @@ INDEX_HTML = """<!doctype html>
       feedbackState.correctness = true;
       document.getElementById('feedback-correct').classList.add('active');
       document.getElementById('feedback-wrong').classList.remove('active');
-      document.getElementById('word-labels').classList.remove('active');
+      document.getElementById('word-labels').classList.add('active');
+      renderAnalysisPreview(true);
+      renderWordChips();
     });
 
     document.getElementById('feedback-wrong').addEventListener('click', () => {
@@ -1396,6 +1661,7 @@ INDEX_HTML = """<!doctype html>
       document.getElementById('feedback-wrong').classList.add('active');
       document.getElementById('feedback-correct').classList.remove('active');
       document.getElementById('word-labels').classList.add('active');
+      renderAnalysisPreview(true);
       renderWordChips();
     });
 
@@ -1430,11 +1696,17 @@ INDEX_HTML = """<!doctype html>
     });
 
     async function loadTrainingTerms() {
-      const response = await fetch('/api/retraining/terms');
-      const data = await response.json();
+      const [termsResponse, configResponse] = await Promise.all([
+        fetch('/api/retraining/terms'),
+        fetch('/api/retraining-config')
+      ]);
+      const data = await termsResponse.json();
+      const config = await configResponse.json();
       const container = document.getElementById('training-results');
       document.getElementById('training-summary').textContent =
         `${data.words.length} palavra(s), ${data.records} feedback(s), armazenamento: ${data.storage}.`;
+      document.getElementById('retraining-interval').value = config.interval || 'weekly';
+      document.getElementById('retraining-next-run').value = config.next_run_at || 'Manual';
 
       if (data.words.length === 0) {
         container.innerHTML = '<div class="feedback-status">Nenhuma palavra salva ainda.</div>';
@@ -1462,6 +1734,43 @@ INDEX_HTML = """<!doctype html>
       `;
     }
 
+    document.getElementById('save-retraining-config').addEventListener('click', async () => {
+      const interval = document.getElementById('retraining-interval').value;
+      const response = await fetch('/api/retraining-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interval })
+      });
+      const config = await response.json();
+      document.getElementById('retraining-next-run').value = config.next_run_at || 'Manual';
+      document.getElementById('retraining-config-status').textContent =
+        `Retreino configurado: ${config.interval_label}.`;
+    });
+
+    document.getElementById('run-retraining').addEventListener('click', async () => {
+      const button = document.getElementById('run-retraining');
+      const status = document.getElementById('retraining-config-status');
+      button.disabled = true;
+      status.textContent = 'Retreinando modelo...';
+      try {
+        const response = await fetch('/api/retraining-run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          status.textContent = data.error || 'Falha ao executar retreino.';
+          return;
+        }
+        document.getElementById('retraining-next-run').value = data.config.next_run_at || 'Manual';
+        status.textContent =
+          `Modelo retreinado com ${data.examples} exemplos. Arquivo: ${data.model_path}.`;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
     document.getElementById('refresh-training').addEventListener('click', loadTrainingTerms);
 
     document.getElementById('freshdesk-fetch').addEventListener('click', () => analyzeFreshdeskTicket(false));
@@ -1487,9 +1796,14 @@ class SentimentRequestHandler(BaseHTTPRequestHandler):
         if self.path == "/api/retraining/terms":
             self._send_json(200, FEEDBACK_STORE.term_summary())
             return
+        if self.path in {"/api/retraining/config", "/api/retraining-config"}:
+            self._send_json(200, load_retraining_config())
+            return
         self.send_error(404)
 
     def do_POST(self) -> None:
+        if self.path in {"/api/analyze", "/api/freshdesk/ticket"}:
+            self._maybe_run_scheduled_retraining()
         if self.path == "/api/analyze":
             self._handle_analyze()
             return
@@ -1498,6 +1812,12 @@ class SentimentRequestHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/feedback":
             self._handle_feedback()
+            return
+        if self.path in {"/api/retraining/config", "/api/retraining-config"}:
+            self._handle_retraining_config()
+            return
+        if self.path in {"/api/retraining/run", "/api/retraining-run"}:
+            self._handle_retraining_run()
             return
         self.send_error(404)
 
@@ -1598,6 +1918,65 @@ class SentimentRequestHandler(BaseHTTPRequestHandler):
         }
 
         self._send_json(200, {"count": FEEDBACK_STORE.save(record)})
+
+    def _handle_retraining_config(self) -> None:
+        payload = self._read_json_body()
+        if payload is None:
+            return
+        self._send_json(200, save_retraining_config(str(payload.get("interval", "weekly"))))
+
+    def _handle_retraining_run(self) -> None:
+        records = FEEDBACK_STORE.list_records(100000)
+        if not records:
+            self._send_json(
+                400,
+                {"error": "Salve pelo menos um feedback antes de retreinar."},
+            )
+            return
+        try:
+            training_result = train_feedback_model(records, RETRAINED_MODEL_FILE)
+            os.environ["SENTIMENT_MODEL_PATH"] = training_result["model_path"]
+            self.__class__.analyzer = create_default_analyzer()
+            config = mark_retraining_run()
+        except Exception as exc:
+            self._send_json(500, {"error": str(exc)})
+            return
+
+        self._send_json(
+            200,
+            {
+                **training_result,
+                "config": config,
+                "engine": "hybrid_leia_ml",
+            },
+        )
+
+    def _maybe_run_scheduled_retraining(self) -> None:
+        config = load_retraining_config()
+        if config.get("interval") == "manual" or not config.get("next_run_at"):
+            return
+        try:
+            next_run = datetime.fromisoformat(str(config["next_run_at"]))
+        except ValueError:
+            return
+        if next_run > datetime.now(timezone.utc):
+            return
+        if not FEEDBACK_STORE.list_records(1):
+            return
+        try:
+            training_result = train_feedback_model(
+                FEEDBACK_STORE.list_records(100000),
+                RETRAINED_MODEL_FILE,
+            )
+            os.environ["SENTIMENT_MODEL_PATH"] = training_result["model_path"]
+            self.__class__.analyzer = create_default_analyzer()
+            mark_retraining_run()
+            print(
+                "Scheduled retraining completed: "
+                f"{training_result['examples']} examples"
+            )
+        except Exception as exc:
+            print(f"Scheduled retraining skipped: {exc}")
 
     def _clean_word_list(self, words: object) -> list[str]:
         if not isinstance(words, list):
